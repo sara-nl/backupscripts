@@ -1,0 +1,26 @@
+#!/bin/bash
+# Configuration file for backup script - webdav example
+# Save as /etc/backup2surfsara and `chmod 400` and customize.
+
+
+SOURCE=/
+EXCLUDE=( /proc \
+          /sys \
+          /tmp \
+          /var/tmp \
+          /var/log \
+          /var/www/cobbler/repo_mirror \
+        )
+
+BACKUPPROTO=webdavs://
+BACKUPSERVER=webdavserver:443
+BACKUPUSER=username
+
+# The short hostname will be appended to this path.
+BACKUPDIR=/users/username/backups/
+
+# Password to connect to destination server (also for other protocols than FTP)
+#export FTP_PASSWORD=myconnectionpassword
+
+# Password to encrypt backups - not the same as FTP_PASSWORD
+#export PASSPHRASE=myencryptionpassword
