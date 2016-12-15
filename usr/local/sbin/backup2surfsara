@@ -1,0 +1,212 @@
+#!/bin/bash
+
+# backup2surfsara: makes a backup to SURFsara storage facilities using duplicity.
+
+# Changelog:
+# 2016-06-00 - Created - Onno
+
+# Todo: adapt to support Swift backend
+
+usage() {
+  cat <<-EOF
+  Usage: $(basename $0) [--full|--report|--check]
+	EOF
+  exit 1
+}
+
+# Process arguments
+DUPLICITY_OPTIONS=''
+REPORT=false
+CHECK=false
+while [ $# -gt 0 ] ; do
+  case "$1" in
+    -h | --help )
+      usage
+      ;;
+    --full )
+      DUPLICITY_OPTIONS="full"
+      ;;
+    --report )
+      REPORT=true
+      ;;
+    --check )
+      CHECK=true
+      ;;
+    * )
+      echo "Unknown option '$1'."
+      usage
+  esac
+  shift
+done
+
+
+# Load config file
+CONFIG=/etc/backup2surfsara
+if [ -f $CONFIG ] ; then
+  source $CONFIG
+else
+  echo "No config file $CONFIG found. Please create it."
+  exit 1
+fi
+
+# Some basic checks
+if ! stat -c %A $CONFIG | grep --silent '^-r..------' ; then
+  echo "File $CONFIG has wrong permisions."
+  exit 1
+fi
+
+if [ -z "$FTP_PASSWORD" ] ; then
+  echo "Var FTP_PASSWORD is empty. Please define it in $CONFIG."
+  exit 1
+fi
+
+if [ -z "$PASSPHRASE" ] ; then
+  echo "Var PASSPHRASE is empty. Please define it in $CONFIG."
+  exit 1
+fi
+
+if [ -z "$SOURCE" ] ; then
+  echo "Var SOURCE is empty. Please define it in $CONFIG."
+  exit 1
+fi
+
+if [ -z "$BACKUPPROTO" ] ; then
+  echo "Var BACKUPPROTO is empty. Please define it in $CONFIG."
+  exit 1
+fi
+
+if [ -z "$BACKUPSERVER" ] ; then
+  echo "Var BACKUPSERVER is empty. Please define it in $CONFIG."
+  exit 1
+fi
+
+if [ -z "$BACKUPUSER" ] ; then
+  echo "Var BACKUPUSER is empty. Please define it in $CONFIG."
+  exit 1
+fi
+
+if [ -z "$BACKUPDIR" ] ; then
+  echo "Var BACKUPDIR is empty. Please define it in $CONFIG."
+  exit 1
+fi
+
+
+function_exists() {
+  declare -f -F $1 > /dev/null
+  return $?
+}
+
+join() {
+  local glue="$1"
+  shift
+  while [ $# -gt 0 ] ; do
+    echo -n "$glue$1"
+    shift
+  done
+}
+
+
+# Check some executables we need
+/usr/bin/which duplicity 2>&1 1>/dev/null || exit 1
+/usr/bin/which curl      2>&1 1>/dev/null || exit 1
+
+
+export FTP_PASSWORD
+export PASSPHRASE
+
+
+# Print report only?
+if $REPORT ; then
+  duplicity collection-status \
+            --ssl-cacert-path /etc/grid-security/certificates/ \
+            ${BACKUPPROTO}${BACKUPUSER}@${BACKUPSERVER}${BACKUPDIR}/$(hostname -s)
+  exit 0
+fi
+
+
+# Check last backup date only?
+if $CHECK ; then
+  # Nagios return codes; with these, you can use this script directly as a Nagios plugin.
+  STATE_OK=0
+  STATE_WARNING=1
+  STATE_CRITICAL=2
+  STATE_UNKNOWN=3
+  STATE_DEPENDENT=4
+  lastbackup=$(duplicity collection-status \
+                   --ssl-cacert-path /etc/grid-security/certificates/ \
+                   webdavs://${BACKUPUSER}@${BACKUPSERVER}${BACKUPDIR}/$(hostname -s) \
+               | grep 'Chain end time' \
+               | sed -e 's/Chain end time: //' \
+               | tail -n 1 \
+              )
+  if [ -z "$lastbackup" ] ; then
+    echo "UNKNOWN: Could not get date of last backup."
+    exit $STATE_UNKNOWN
+  fi
+  # Compare Unix time stamps
+  refdate=$(date -d '30 hours ago' +%s)
+  lastdate=$(date -d "$lastbackup" +%s)
+  if [ $lastdate -lt $refdate ] ; then
+    echo "CRITICAL: last backup was more than 30 hours ago: $lastbackup"
+    exit $STATE_CRITICAL
+  else
+    echo "OK: Last backup date is recent: $lastbackup" 
+    exit $STATE_OK
+  fi
+  exit $STATE_UNKNOWN
+fi
+
+
+# Print timestamp for in log.
+echo
+date
+
+
+# Things to do before the backup. You can define this function in /etc/backup2surfsara.
+if function_exists pre_backup ; then
+  echo "Excuting pre_backup ..."
+  pre_backup
+  echo "Finished pre_backup."
+fi
+
+
+# Prepare for backup.
+EXCLUDELIST=$(join ' --exclude ' ${EXCLUDE[@]});
+echo "Exclude list: ${EXCLUDE[@]}"
+
+
+# Run backup.
+DESTINATION="${BACKUPPROTO}${BACKUPUSER}@${BACKUPSERVER}${BACKUPDIR}/$(hostname -s)"
+echo "Backing up $SOURCE to $DESTINATION"
+
+duplicity $DUPLICITY_OPTIONS \
+          --ssl-cacert-path /etc/grid-security/certificates/ \
+          --full-if-older-than 1M \
+          --volsize 1000 \
+          $EXCLUDELIST \
+          $SOURCE \
+          "$DESTINATION"
+
+echo "Backup finished."
+
+echo "Cleaning up old backups. Last 2 full backups and their incrementals are kept."
+
+duplicity remove-all-but-n-full 2 --force \
+            --ssl-cacert-path /etc/grid-security/certificates/ \
+            ${BACKUPPROTO}${BACKUPUSER}@${BACKUPSERVER}${BACKUPDIR}/$(hostname -s)
+
+echo "Finished cleanup."
+
+
+# Things to do after backup. You can define this function in /etc/backup2surfsara.
+if function_exists post_backup ; then
+  echo "Excuting post_backup ..."
+  post_backup
+  echo "Finished post_backup."
+fi
+
+
+# Print timestamp for in log
+echo
+date
+echo
