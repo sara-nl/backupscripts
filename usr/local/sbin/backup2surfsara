@@ -90,6 +90,11 @@ if [ -z "$BACKUPDIR" ] ; then
   exit 1
 fi
 
+# Newer versions of Duplicity want this
+if [ $(ulimit -n) -lt 1024 ] ; then
+  ulimit -n 1024
+fi
+
 
 function_exists() {
   declare -f -F $1 > /dev/null
