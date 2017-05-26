@@ -5,12 +5,11 @@
 # Changelog:
 # 2016-06-00 - Created - Onno
 # 2017-05-23 - Added ulimit - Onno
-
-# Todo: adapt to support Swift backend
+# 2017-05-26 - Adapted to Swift - Onno
 
 usage() {
   cat <<-EOF
-  Usage: $(basename $0) [--full|--report|--check]
+  Usage: $(basename $0) [--full|--report|--check] [--config <file>]
 	EOF
   exit 1
 }
@@ -19,6 +18,7 @@ usage() {
 DUPLICITY_OPTIONS=''
 REPORT=false
 CHECK=false
+CONFIG=/etc/backup2surfsara
 while [ $# -gt 0 ] ; do
   case "$1" in
     -h | --help )
@@ -33,6 +33,10 @@ while [ $# -gt 0 ] ; do
     --check )
       CHECK=true
       ;;
+    --config )
+      CONFIG="$2"
+      shift
+      ;;
     * )
       echo "Unknown option '$1'."
       usage
@@ -42,22 +46,16 @@ done
 
 
 # Load config file
-CONFIG=/etc/backup2surfsara
-if [ -f $CONFIG ] ; then
-  source $CONFIG
+if [ -f "$CONFIG" ] ; then
+  source "$CONFIG"
 else
-  echo "No config file $CONFIG found. Please create it."
+  echo "No config file '$CONFIG' found."
   exit 1
 fi
 
 # Some basic checks
-if ! stat -c %A $CONFIG | grep --silent '^-r..------' ; then
-  echo "File $CONFIG has wrong permisions."
-  exit 1
-fi
-
-if [ -z "$FTP_PASSWORD" ] ; then
-  echo "Var FTP_PASSWORD is empty. Please define it in $CONFIG."
+if ! stat -c %A "$CONFIG" | grep --silent '^-r..------' ; then
+  echo "File '$CONFIG' has wrong permisions."
   exit 1
 fi
 
@@ -76,19 +74,36 @@ if [ -z "$BACKUPPROTO" ] ; then
   exit 1
 fi
 
-if [ -z "$BACKUPSERVER" ] ; then
-  echo "Var BACKUPSERVER is empty. Please define it in $CONFIG."
-  exit 1
+if [[ $BACKUPPROTO =~ webdav ]] ; then
+  if [ -z "$FTP_PASSWORD" ] ; then
+    echo "Var FTP_PASSWORD is empty. Please define it in $CONFIG."
+    exit 1
+  fi
+
+  if [ -z "$SOURCE" ] ; then
+    echo "Var SOURCE is empty. Please define it in $CONFIG."
+    exit 1
+  fi
+
+  if [ -z "$BACKUPSERVER" ] ; then
+    echo "Var BACKUPSERVER is empty. Please define it in $CONFIG."
+    exit 1
+  fi
+
+  if [ -z "$BACKUPUSER" ] ; then
+    echo "Var BACKUPUSER is empty. Please define it in $CONFIG."
+    exit 1
+  fi
+
+  if [ -z "$BACKUPDIR" ] ; then
+    echo "Var BACKUPDIR is empty. Please define it in $CONFIG."
+    exit 1
+  fi
 fi
 
-if [ -z "$BACKUPUSER" ] ; then
-  echo "Var BACKUPUSER is empty. Please define it in $CONFIG."
-  exit 1
-fi
-
-if [ -z "$BACKUPDIR" ] ; then
-  echo "Var BACKUPDIR is empty. Please define it in $CONFIG."
-  exit 1
+if [ -z "$BACKUPCHAINLENGTH" ] ; then
+  echo "Var BACKUPCHAINLENGTH is empty. Defaulting to 3M (3 months)."
+  BACKUPCHAINLENGTH='3M'
 fi
 
 # Newer versions of Duplicity want this
@@ -120,12 +135,24 @@ join() {
 export FTP_PASSWORD
 export PASSPHRASE
 
+case $BACKUPPROTO in
+  webdav* )
+    DESTINATION="${BACKUPPROTO}${BACKUPUSER}@${BACKUPSERVER}${BACKUPDIR}/$(hostname -s)"
+    ;;
+  swift* )
+    DESTINATION="${BACKUPPROTO}duplicity_backup_$(hostname -s)"
+    ;;
+  * )
+    echo "ERROR: backup protocol $BACKUPPROTO not yet implemented in $0."
+    exit 1
+esac
+
 
 # Print report only?
 if $REPORT ; then
   duplicity collection-status \
             --ssl-cacert-path /etc/grid-security/certificates/ \
-            ${BACKUPPROTO}${BACKUPUSER}@${BACKUPSERVER}${BACKUPDIR}/$(hostname -s)
+            "$DESTINATION"
   exit 0
 fi
 
@@ -140,7 +167,7 @@ if $CHECK ; then
   STATE_DEPENDENT=4
   lastbackup=$(duplicity collection-status \
                    --ssl-cacert-path /etc/grid-security/certificates/ \
-                   webdavs://${BACKUPUSER}@${BACKUPSERVER}${BACKUPDIR}/$(hostname -s) \
+                   "$DESTINATION" \
                | grep 'Chain end time' \
                | sed -e 's/Chain end time: //' \
                | tail -n 1 \
@@ -182,12 +209,11 @@ echo "Exclude list: ${EXCLUDE[@]}"
 
 
 # Run backup.
-DESTINATION="${BACKUPPROTO}${BACKUPUSER}@${BACKUPSERVER}${BACKUPDIR}/$(hostname -s)"
 echo "Backing up $SOURCE to $DESTINATION"
 
 duplicity $DUPLICITY_OPTIONS \
           --ssl-cacert-path /etc/grid-security/certificates/ \
-          --full-if-older-than 1M \
+          --full-if-older-than $BACKUPCHAINLENGTH \
           --volsize 1000 \
           $EXCLUDELIST \
           $SOURCE \
@@ -199,7 +225,7 @@ echo "Cleaning up old backups. Last 2 full backups and their incrementals are ke
 
 duplicity remove-all-but-n-full 2 --force \
             --ssl-cacert-path /etc/grid-security/certificates/ \
-            ${BACKUPPROTO}${BACKUPUSER}@${BACKUPSERVER}${BACKUPDIR}/$(hostname -s)
+            "$DESTINATION"
 
 echo "Finished cleanup."
 
