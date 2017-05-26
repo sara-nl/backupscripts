@@ -25,3 +25,6 @@ BACKUPDIR=/users/username/backups/
 
 # Password to encrypt backups - not the same as FTP_PASSWORD
 #export PASSPHRASE=myencryptionpassword
+
+# Make a new chain after how much time?
+export BACKUPCHAINLENGTH='1M'
