@@ -16,6 +16,7 @@
 # 2017-05-24 - Added python-swiftclient and python-keystoneclient - Onno
 # 2017-07-25 - Added python-fasteners - Onno
 # 2017-07-25 - Pick the top tarball, assuming it's the newest (because sorting doesn't always work) - Onno
+# 2017-07-25 - Show installed version - Onno
 
 # For package details see http://duplicity.nongnu.org/duplicity.1.html#sect30 (Requirements section)
 yum -y install wget gcc rsync \
@@ -39,3 +40,7 @@ wget "$latest" -O duplicity.tar.gz
 tar -xf duplicity.tar.gz
 cd duplicity*/
 python setup.py install
+
+echo
+echo 'Running `duplicity --version`:'
+duplicity --version
