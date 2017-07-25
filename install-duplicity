@@ -1,7 +1,9 @@
 #!/bin/bash
 
-# The version of duplicity in the EL repo is way too old.
-# This installs the latest duplicity, including dependencies.
+# The version of duplicity in the EL repo can be way too old.
+# [ Currently, the EPEL version is OK - Check this with `yum info duplicity`. ]
+#
+# This script installs the latest duplicity, including dependencies.
 # This script has been tested on Centos 7.
 # Just run it as root, sit back and enjoy:
 #   wget https://raw.githubusercontent.com/onnozweers/scripts/master/install-duplicity
