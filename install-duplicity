@@ -14,11 +14,12 @@
 # 2016-11-09 - Added python-paramiko - Onno
 # 2016-11-12 - Added rsync, python-crypto, python-boto - Onno
 # 2017-05-24 - Added python-swiftclient and python-keystoneclient - Onno
+# 2017-07-25 - Added python-fasteners - Onno
 
 # For package details see http://duplicity.nongnu.org/duplicity.1.html#sect30 (Requirements section)
 yum -y install wget gcc rsync \
                python-devel python-pip librsync-devel python-lockfile \
-               python-paramiko python-crypto python-boto
+               python-paramiko python-crypto python-boto python-fasteners
 pip install PyDrive python-swiftclient python-keystoneclient
 
 # Prepare dir
