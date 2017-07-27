@@ -28,6 +28,6 @@ A wrapper for Duplicity to more easily maintain your Duplicity backups.
 
 Makes a backup of a running libvirt virtual machine. This is done by making a snapshot, copying that to a rsync compatible location (a /path or hostname:/path), and then cleaning up the snapshot.
 
-* Tested on Centos 7, but please don't use this onyou production VMs without proper testing!
+* Tested on Centos 7, but please don't use this on your production VMs without proper testing!
 * Supports multiple disks per VM.
 * Can back up all running VMs with `--all`.
