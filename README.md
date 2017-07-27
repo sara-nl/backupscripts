@@ -7,7 +7,7 @@ This script will install the latest greatest Duplicity on RHEL/Centos 7, includi
 
 ## backup2surfsara
 
-A wrapper for Duplicity to easier maintain your Duplicity backups.
+A wrapper for Duplicity to more easily maintain your Duplicity backups.
 
 * /etc/backup2surfsara[.swift|.webdav]
   * Contains (connection) password and (encryption) passphrase.
