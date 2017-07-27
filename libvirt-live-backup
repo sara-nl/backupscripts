@@ -31,7 +31,6 @@ fi
 if [ -z "$2" ] ; then
   usage
   echo "Please specify a location to back up to."
-  virsh list --all
   exit 1
 fi
 
