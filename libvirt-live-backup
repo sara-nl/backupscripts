@@ -94,12 +94,9 @@ copy_disks() {
   # disks may have different names than the VM! extract names from domblklist!
   for file in $(get_snapshot_backing_files "$VM") ; do
     echo "  $file"
-    # Why the two rsyncs?
-    # It's a trick to make the replica also a sparse file, and still have efficient (inplace) transfers. 
-    # See https://serverfault.com/questions/66338/how-do-you-synchronise-huge-sparse-files-vm-disk-images-between-machines
-    rsync --archive --existing --inplace       "$file" "$TARGETDIR"
-    rsync --archive --ignore-existing --sparse "$file" "$TARGETDIR"
-  done
+    # --archive = keep file properties (ownership etc)
+    # --sparse  = make small copies
+    rsync --archive --sparse "$file" "$TARGETDIR"  done
 }
 
 remove_vm_snapshot() {
