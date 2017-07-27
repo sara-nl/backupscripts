@@ -1,4 +1,4 @@
-# backupscripts
+# Backup scripts
 Some scripts to back up systems.
 
 ## install-duplicity
