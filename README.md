@@ -31,3 +31,10 @@ Makes a backup of a running libvirt virtual machine. This is done by making a sn
 * Tested on Centos 7, but please don't use this on your production VMs without proper testing!
 * Supports multiple disks per VM.
 * Can back up all running VMs with `--all`.
+
+To enable libvirt snapshots, you need a Qemu version from the centos-release-qemu-ev repo.
+
+    yum -y install centos-release-qemu-ev
+    yum -y install qemu-kvm-ev
+
+And then I'm afraid you need to reboot your VM host; a restart of `libvirtd` is not enough.
