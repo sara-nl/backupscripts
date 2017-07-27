@@ -9,6 +9,11 @@
 #  * If a VM has multiple block devices, all will be backed up
 #  * The backups will be sparse files, to save space
 
+# Requirements: to make live snapshots, you need a Qemu version from the centos-release-qemu-ev repo.
+#   yum -y install centos-release-qemu-ev
+#   yum -y install qemu-kvm-ev
+# And then reboot your VM host... A restart of libvirt is not enough.
+
 # Changelog
 # 2017-07-26 - Initial version - Onno
 # 2017-07-27 - Code improvements - Onno
