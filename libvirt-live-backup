@@ -7,9 +7,13 @@
 # Features:
 #  * Can back up one VM or all running VMs (with --all)
 #  * If a VM has multiple block devices, all will be backed up
+#  * The backups will be sparse files, to save space
 
 # Changelog
 # 2017-07-26 - Initial version - Onno
+# 2017-07-27 - Code improvements - Onno
+# 2017-07-27 - Copies will be sparse files - Onno
+# 2017-07-27 - VM XML will be backed up too - Onno
 
 usage() {
   echo "Backs up a running VM by creating a temporary snapshot."
@@ -19,7 +23,6 @@ usage() {
 }
 
 if [ -z "$1" ] ; then
-  usage
   echo "Please specify a VM to back up, or specify --all."
   virsh list --all
   exit 1
@@ -28,8 +31,14 @@ fi
 if [ -z "$2" ] ; then
   usage
   echo "Please specify a location to back up to."
+  virsh list --all
   exit 1
 fi
+
+# Name suffix for the overlay files
+SUFFIX='-libvirt-live-backup-overlay'
+
+# Define some functions
 
 get_block_devs() {
   # List the block devices (vda etc.) for a domain.
@@ -47,12 +56,26 @@ get_snapshot_backing_files() {
   | sed -e "s/.*<source file='\(.*\)'\/>.*/\1/g"
 }
 
+copy_xml() {
+  VM="$1"
+  xmlfile=$(mktemp)
+  echo "Copying the XML definition of '$VM'..."
+  virsh dumpxml "$VM" > "$xmlfile"
+  rsync --archive "$xmlfile" "$TARGETDIR/$VM.xml"
+  rm -f "$xmlfile"
+  echo "Done."
+}
+
 create_vm_snapshot() {
   VM="$1"
+  if virsh domblklist "$VM" --details | grep 'disk' | grep -v '\.qcow2' ; then
+    echo "ERROR: this VM contains a disk that is not qcow2 format. This has not been tested."
+    exit 1
+  fi
   diskspecs=$(virsh domblklist "$VM" --details \
               | awk '$2 == "disk" {print "--diskspec " $3 ",file=" $4}' \
-              | sed -e 's/.qcow2$/-overlay.qcow2/' \
-              | tr '\n' ' ')  
+              | sed -e "s/\.qcow2$/$SUFFIX.qcow2/" \
+              | tr '\n' ' ')
   # First try with --quiesce to get more consistent snapshot; if that fails, try without; if that failes, quit.
   virsh snapshot-create-as --domain "$VM" \
                            --name "$VM-snapshot" \
@@ -65,16 +88,18 @@ create_vm_snapshot() {
   || exit 1
 }
 
-copy_vm() {
-  # Make a copy of the disks snapshots and the VM description XML.
+copy_disks() {
+  # Make a copy of the disks snapshots.
   VM="$1"
   echo "Copying snapshot disks to '$TARGETDIR' ..."
   # disks may have different names than the VM! extract names from domblklist!
-  for image in $(get_snapshot_backing_files "$VM") ; do
-    # We copy with rsync because it is atomic (we'll have either a good file or no file).
-    echo "  $image"
-    rsync -a "$image" "$TARGETDIR"
-    # ToDo: copy VM definition XML file
+  for file in $(get_snapshot_backing_files "$VM") ; do
+    echo "  $file"
+    # Why the two rsyncs?
+    # It's a trick to make the replica also a sparse file, and still have efficient (inplace) transfers. 
+    # See https://serverfault.com/questions/66338/how-do-you-synchronise-huge-sparse-files-vm-disk-images-between-machines
+    rsync --archive --existing --inplace       "$file" "$TARGETDIR"
+    rsync --archive --ignore-existing --sparse "$file" "$TARGETDIR"
   done
 }
 
@@ -93,8 +118,8 @@ remove_vm_snapshot() {
   echo "Cleaning up committed overlay files..."
   files_in_use=$(virsh dumpxml $VM | awk -F  "'" '/<source file=.*/ {print $2}')
   for overlayfile in $(virsh domblklist "$VM" --details \
-                | awk '$2 == "disk" {print $4}' \
-                | sed -e 's/.qcow2$/-overlay.qcow2/')
+                       | awk '$2 == "disk" {print $4}' \
+                       | sed -e "s/\.qcow2$/$SUFFIX.qcow2/")
   do
     # But first: test if the file is in use by the VM!
     if fgrep "$overlayfile" <<<"$files_in_use" ; then
@@ -123,7 +148,8 @@ TARGETDIR="$2"
 mkdir -p "$TARGETDIR"
 
 for VM in $VMLIST ; do
+  copy_xml "$VM"
   create_vm_snapshot "$VM"
-  copy_vm "$VM"
+  copy_disks "$VM"
   remove_vm_snapshot "$VM"
 done
