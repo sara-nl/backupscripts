@@ -96,7 +96,8 @@ copy_disks() {
     echo "  $file"
     # --archive = keep file properties (ownership etc)
     # --sparse  = make small copies
-    rsync --archive --sparse "$file" "$TARGETDIR"  done
+    rsync --archive --sparse "$file" "$TARGETDIR"
+  done
 }
 
 remove_vm_snapshot() {
