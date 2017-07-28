@@ -15,11 +15,20 @@
 #   yum -y install qemu-kvm-ev
 # And then reboot your VM host... A restart of libvirt is not enough.
 
+# Restore procedure:
+# 1. Copy back disk image(s):
+#   root@vmhost:~ # cp /var/lib/libvirt/images/backups/myvm.img /var/lib/libvirt/images/
+# 2. Re-create the VM:
+#   root@vmhost:~ # virsh create /var/lib/libvirt/images/backups/myvm.xml 
+#   Domain myvm created from /var/lib/libvirt/images/backups/myvm.xml
+
+
 # Changelog
 # 2017-07-26 - Initial version - Onno
 # 2017-07-27 - Code improvements - Onno
 # 2017-07-27 - Copies will be sparse files - Onno
 # 2017-07-27 - VM XML will be backed up too - Onno
+# 2017-07-29 - Besides Qcow2 also support for raw images - Onno
 
 usage() {
   echo "Backs up a running VM by creating a temporary snapshot."
@@ -73,13 +82,13 @@ copy_xml() {
 
 create_vm_snapshot() {
   VM="$1"
-  if virsh domblklist "$VM" --details | grep 'disk' | grep -v '\.qcow2' ; then
-    echo "ERROR: this VM contains a disk that is not qcow2 format. This has not been tested."
+  if virsh domblklist "$VM" --details | grep 'disk' | egrep -v '\.(qcow2|img)$' ; then
+    echo "ERROR: this VM contains a disk format that has not been tested."
     exit 1
   fi
   diskspecs=$(virsh domblklist "$VM" --details \
               | awk '$2 == "disk" {print "--diskspec " $3 ",file=" $4}' \
-              | sed -e "s/\.qcow2$/$SUFFIX.qcow2/" \
+              | sed -e "s/\.\(qcow2\|img\)$/$SUFFIX.\1/" \
               | tr '\n' ' ')
   # First try with --quiesce to get more consistent snapshot; if that fails, try without; if that failes, quit.
   virsh snapshot-create-as --domain "$VM" \
@@ -122,7 +131,7 @@ remove_vm_snapshot() {
   files_in_use=$(virsh dumpxml $VM | awk -F  "'" '/<source file=.*/ {print $2}')
   for overlayfile in $(virsh domblklist "$VM" --details \
                        | awk '$2 == "disk" {print $4}' \
-                       | sed -e "s/\.qcow2$/$SUFFIX.qcow2/")
+                       | sed -e "s/\.\(qcow2\|img\)$/$SUFFIX.\1/")
   do
     # But first: test if the file is in use by the VM!
     if fgrep "$overlayfile" <<<"$files_in_use" ; then
