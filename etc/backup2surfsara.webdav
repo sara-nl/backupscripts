@@ -2,7 +2,7 @@
 # Configuration file for backup script - webdav example
 # Save as /etc/backup2surfsara and `chmod 400` and customize.
 
-
+DUPLICITY_OPTIONS=''
 SOURCE=/
 EXCLUDE=( /proc \
           /sys \
