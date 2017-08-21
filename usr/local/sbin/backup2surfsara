@@ -6,6 +6,7 @@
 # 2016-06-00 - Created - Onno
 # 2017-05-23 - Added ulimit - Onno
 # 2017-05-26 - Adapted to Swift - Onno
+# 2017-08-21 - Init DUPLICITY_OPTIONS in the config file instead of the main script - Onno
 
 usage() {
   cat <<-EOF
@@ -15,7 +16,6 @@ usage() {
 }
 
 # Process arguments
-DUPLICITY_OPTIONS=''
 REPORT=false
 CHECK=false
 CONFIG=/etc/backup2surfsara
@@ -25,7 +25,7 @@ while [ $# -gt 0 ] ; do
       usage
       ;;
     --full )
-      DUPLICITY_OPTIONS="full"
+      DUPLICITY_OPTIONS="full $DUPLICITY_OPTIONS"
       ;;
     --report )
       REPORT=true
