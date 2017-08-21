@@ -1,7 +1,8 @@
 #!/bin/bash
 # Configuration for backup script
 
-SOURCE=/a
+DUPLICITY_OPTIONS=''
+SOURCE=/
 EXCLUDE=( /proc \
           /sys \
           /tmp \
