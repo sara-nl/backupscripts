@@ -14,6 +14,8 @@
 #   yum -y install centos-release-qemu-ev
 #   yum -y install qemu-kvm-ev
 # And then reboot your VM host... A restart of libvirt is not enough.
+# Best practice; install the qemu-guest-agent on your virtual machine(s).
+#   yum -y install qemu-guest-agent
 
 # Restore procedure:
 # 1. Copy back disk image(s):
@@ -22,37 +24,110 @@
 #   root@vmhost:~ # virsh create /var/lib/libvirt/images/backups/myvm.xml 
 #   Domain myvm created from /var/lib/libvirt/images/backups/myvm.xml
 
-
 # Changelog
 # 2017-07-26 - Initial version - Onno
 # 2017-07-27 - Code improvements - Onno
 # 2017-07-27 - Copies will be sparse files - Onno
 # 2017-07-27 - VM XML will be backed up too - Onno
 # 2017-07-29 - Besides Qcow2 also support for raw images - Onno
+# 2017-08-23 - Add exclude option and change of parsing user arguments - Tom
+# 2017-08-24 - Extend exclude option with a file & command-line argument option - Tom
 
-usage() {
-  echo "Backs up a running VM by creating a temporary snapshot."
-  echo "Usage:"
-  echo "    $0 [VM] [targethost:]/targetdir"
-  echo "    $0 --all [targethost:]/targetdir"
-}
 
-if [ -z "$1" ] ; then
-  echo "Please specify a VM to back up, or specify --all."
-  virsh list --all
-  exit 1
-fi
-
-if [ -z "$2" ] ; then
-  usage
-  echo "Please specify a location to back up to."
-  exit 1
-fi
-
+##############################################################
+#   Not really changeable variables
+##############################################################
+# Script name
+MYNAME=`basename $0`
+# Hostname
+MYHOST=`/bin/hostname -s`
 # Name suffix for the overlay files
 SUFFIX='-libvirt-live-backup-overlay'
 
-# Define some functions
+##############################################################
+#   Help Function
+##############################################################
+
+show_help() {
+    echo
+    echo " Usage: $MYNAME [ -s | -a | -e | -f | -t | -d | -h ]"
+    echo "  -a | --all     : Backup all servers"
+    echo "  -d | --debug   : Debug mode"
+    echo "  -e | --exclude : Exclude list"
+    echo "  -f | --file    : File with a list of vms which will be excluded for backupping"
+    echo "  -s | --single  : Backup a single server (string)"
+    echo "  -t | --target  : Target dir (Location to back up to.)"
+    echo "  -h | --help    : Show this menu"
+    echo
+    echo " Examples: $MYNAME -s test-vm -t /var/lib/libvirt/backups/ "
+    echo "           $MYNAME -a -f /etc/exclude_vms_for_backup -t /var/lib/libvirt/backups/ "
+    echo "           $MYNAME -a -e 'vm1, vm2, vm3' -t /var/lib/libvirt/backups/ "
+    echo
+    echo " Overview of running VMs"
+    virsh list --all
+}
+
+##############################################################
+#   Basic checks
+##############################################################
+
+# Read the given arguments
+while [[ $# > 0 ]]
+do
+    key="$1"
+    case $key in
+        -d|--debug )    DEBUG="1"
+                        shift # next argument
+                        ;;
+        -s|--single)    SINGLE=$2
+                        shift # next argument
+                        ;;
+        -a|--all)       ALL="1"
+                        ;;
+        -e|--exclude)   EXCLUDE_LIST=$2
+                        shift # next argument
+                        ;;
+        -f|--file)      EXCLUDE_FILE=$2
+                        shift # past argument
+                        ;;
+        -t|--targetdir) TARGETDIR=$2
+                        shift # next argument
+                        ;;
+        -h|--help)      show_help
+                        exit
+                        ;;
+        * )             echo "Invalid Argument given: $1 "
+                        show_help
+                        exit 1
+                        ;;
+    esac
+    shift # next argument or value
+done
+
+# Check for --single or --all argument
+if [ -z "$SINGLE" ] && [ -z "$ALL" ] ; then
+    echo "Please specify a VM to back up with --single, or specify --all to backup all vm's."
+    show_help
+    exit 1
+fi
+
+# Check of target location is defined
+if [ -z "$TARGETDIR" ] ; then
+    echo "Please specify a location to back up to."
+    show_help
+    exit 1
+fi
+
+# Use the exclude file when it is specified, otherwise check for a exclude list from the command line
+if [ -n "$EXCLUDE_FILE" ] && [ -f "$EXCLUDE_FILE" ]; then
+    EXCLUDED_VMS=`cat "$EXCLUDE_FILE"`
+elif [ -n "$EXCLUDE_LIST" ]; then
+    EXCLUDED_VMS=`echo "$EXCLUDE_LIST"`
+fi
+
+##############################################################
+#   Functions
+##############################################################
 
 get_block_devs() {
   # List the block devices (vda etc.) for a domain.
@@ -145,23 +220,31 @@ remove_vm_snapshot() {
   virsh domblklist "$VM" --details
 }
 
-# End of functions; start working here
+##############################################################
+#   Main - start working here
+##############################################################
 
+# Did we get a single VM name, or a --all request?
+if [ -n "$ALL" ]; then
+    VMLIST=$(virsh list | awk '/running/ {print $2}')
+elif [ -n "$SINGLE" ]; then
+    VMLIST="$SINGLE"
+fi
 
-# Did we get a VM name, or --all?
-case "$1" in
-  --all ) 
-    VMLIST=$(virsh list | awk '/running/ {print $2}') ;;
-  * )
-    VMLIST="$1" ;;
-esac
-
-TARGETDIR="$2"
-mkdir -p "$TARGETDIR"
+# Does the TARGETDIR exists?
+if [ ! -d "$TARGETDIR" ]; then
+    mkdir -p "$TARGETDIR"
+fi
 
 for VM in $VMLIST ; do
-  copy_xml "$VM"
-  create_vm_snapshot "$VM"
-  copy_disks "$VM"
-  remove_vm_snapshot "$VM"
+    # Check of VM is on exclude list
+    if [ -n "$EXCLUDED_VMS" ] && echo "$EXCLUDED_VMS" | grep -Fwq "$VM" ; then
+        continue
+    fi
+
+    # Start backup job
+    copy_xml "$VM"
+    create_vm_snapshot "$VM"
+    copy_disks "$VM"
+    remove_vm_snapshot "$VM"
 done
