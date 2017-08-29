@@ -7,6 +7,7 @@
 # 2017-05-23 - Added ulimit - Onno
 # 2017-05-26 - Adapted to Swift - Onno
 # 2017-08-21 - Init DUPLICITY_OPTIONS in the config file instead of the main script - Onno
+# 2017-08029 - Pass on unknown options to duplicity - Onno
 
 usage() {
   cat <<-EOF
@@ -38,8 +39,8 @@ while [ $# -gt 0 ] ; do
       shift
       ;;
     * )
-      echo "Unknown option '$1'."
-      usage
+      echo "Will pass on option '$1' to duplicity."
+      DUPLICITY_OPTIONS="$DUPLICITY_OPTIONS $1"
   esac
   shift
 done
@@ -214,7 +215,6 @@ echo "Backing up $SOURCE to $DESTINATION"
 duplicity $DUPLICITY_OPTIONS \
           --ssl-cacert-path /etc/grid-security/certificates/ \
           --full-if-older-than $BACKUPCHAINLENGTH \
-          --volsize 1000 \
           $EXCLUDELIST \
           $SOURCE \
           "$DESTINATION"
@@ -224,8 +224,8 @@ echo "Backup finished."
 echo "Cleaning up old backups. Last 2 full backups and their incrementals are kept."
 
 duplicity remove-all-but-n-full 2 --force \
-            --ssl-cacert-path /etc/grid-security/certificates/ \
-            "$DESTINATION"
+          --ssl-cacert-path /etc/grid-security/certificates/ \
+          "$DESTINATION"
 
 echo "Finished cleanup."
 
