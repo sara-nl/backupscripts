@@ -9,7 +9,11 @@ EXCLUDE=( /proc \
           /var/tmp \
           /var/log \
           /var/www/cobbler/repo_mirror \
+          /var/cache \
           /root/.cache/ \
+          /home/*/.cache \
+          /home/*/nobackup \
+          /home/*/Downloads \
         )
 
 BACKUPPROTO=swift://
