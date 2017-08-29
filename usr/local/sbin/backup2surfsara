@@ -20,13 +20,14 @@ usage() {
 REPORT=false
 CHECK=false
 CONFIG=/etc/backup2surfsara
+DUPLICITY_CLI_OPTIONS=''   # Options can be set in the config file too but that is not loaded yet.
 while [ $# -gt 0 ] ; do
   case "$1" in
     -h | --help )
       usage
       ;;
     --full )
-      DUPLICITY_OPTIONS="full $DUPLICITY_OPTIONS"
+      DUPLICITY_CLI_OPTIONS="full $DUPLICITY_CLI_OPTIONS"
       ;;
     --report )
       REPORT=true
@@ -40,7 +41,7 @@ while [ $# -gt 0 ] ; do
       ;;
     * )
       echo "Will pass on option '$1' to duplicity."
-      DUPLICITY_OPTIONS="$DUPLICITY_OPTIONS $1"
+      DUPLICITY_CLI_OPTIONS="$DUPLICITY_CLI_OPTIONS $1"
   esac
   shift
 done
@@ -213,6 +214,7 @@ echo "Exclude list: ${EXCLUDE[@]}"
 echo "Backing up $SOURCE to $DESTINATION"
 
 duplicity $DUPLICITY_OPTIONS \
+          $DUPLICITY_CLI_OPTIONS \
           --ssl-cacert-path /etc/grid-security/certificates/ \
           --full-if-older-than $BACKUPCHAINLENGTH \
           $EXCLUDELIST \
