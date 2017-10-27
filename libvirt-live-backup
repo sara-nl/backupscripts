@@ -51,13 +51,13 @@ SUFFIX='-libvirt-live-backup-overlay'
 show_help() {
     echo
     echo " Usage: $MYNAME [ -s | -a | -e | -f | -t | -d | -h ]"
-    echo "  -a | --all     : Backup all servers"
-    echo "  -d | --debug   : Debug mode"
-    echo "  -e | --exclude : Exclude list, comma separated"
-    echo "  -f | --file    : File with an exclude list, comma or newline separated"
-    echo "  -s | --single  : Backup a single server (string)"
-    echo "  -t | --target  : Target dir (Location to back up to.)"
-    echo "  -h | --help    : Show this menu"
+    echo "  -a | --all       : Backup all servers"
+    echo "  -d | --debug     : Debug mode"
+    echo "  -e | --exclude   : Exclude list, comma separated"
+    echo "  -f | --file      : File with an exclude list, comma or newline separated"
+    echo "  -s | --single    : Backup a single server (string)"
+    echo "  -t | --targetdir : Target dir (Location to back up to.)"
+    echo "  -h | --help      : Show this menu"
     echo
     echo " Examples: $MYNAME -s test-vm -t /var/lib/libvirt/backups/ "
     echo "           $MYNAME -a -f /etc/exclude_vms_from_backup -t /var/lib/libvirt/backups/ "
