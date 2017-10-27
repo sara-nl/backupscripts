@@ -53,15 +53,15 @@ show_help() {
     echo " Usage: $MYNAME [ -s | -a | -e | -f | -t | -d | -h ]"
     echo "  -a | --all     : Backup all servers"
     echo "  -d | --debug   : Debug mode"
-    echo "  -e | --exclude : Exclude list"
-    echo "  -f | --file    : File with a list of vms which will be excluded for backupping"
+    echo "  -e | --exclude : Exclude list, comma separated"
+    echo "  -f | --file    : File with an exclude list, comma or newline separated"
     echo "  -s | --single  : Backup a single server (string)"
     echo "  -t | --target  : Target dir (Location to back up to.)"
     echo "  -h | --help    : Show this menu"
     echo
     echo " Examples: $MYNAME -s test-vm -t /var/lib/libvirt/backups/ "
-    echo "           $MYNAME -a -f /etc/exclude_vms_for_backup -t /var/lib/libvirt/backups/ "
-    echo "           $MYNAME -a -e 'vm1, vm2, vm3' -t /var/lib/libvirt/backups/ "
+    echo "           $MYNAME -a -f /etc/exclude_vms_from_backup -t /var/lib/libvirt/backups/ "
+    echo "           $MYNAME -a -e 'vm1,vm2,vm3' -t /var/lib/libvirt/backups/ "
     echo
     echo " Overview of running VMs"
     virsh list --all
@@ -79,18 +79,18 @@ do
         -d|--debug )    DEBUG="1"
                         shift # next argument
                         ;;
-        -s|--single)    SINGLE=$2
+        -s|--single)    SINGLE="$2"
                         shift # next argument
                         ;;
         -a|--all)       ALL="1"
                         ;;
-        -e|--exclude)   EXCLUDE_LIST=$2
+        -e|--exclude)   EXCLUDE_LIST="$2"
                         shift # next argument
                         ;;
-        -f|--file)      EXCLUDE_FILE=$2
+        -f|--file)      EXCLUDE_FILE="$2"
                         shift # past argument
                         ;;
-        -t|--targetdir) TARGETDIR=$2
+        -t|--targetdir) TARGETDIR="$2"
                         shift # next argument
                         ;;
         -h|--help)      show_help
@@ -106,7 +106,7 @@ done
 
 # Check for --single or --all argument
 if [ -z "$SINGLE" ] && [ -z "$ALL" ] ; then
-    echo "Please specify a VM to back up with --single, or specify --all to backup all vm's."
+    echo "Please specify a VM to back up with --single, or specify --all to backup all VMs."
     show_help
     exit 1
 fi
@@ -120,9 +120,9 @@ fi
 
 # Use the exclude file when it is specified, otherwise check for a exclude list from the command line
 if [ -n "$EXCLUDE_FILE" ] && [ -f "$EXCLUDE_FILE" ]; then
-    EXCLUDED_VMS=`cat "$EXCLUDE_FILE"`
+    EXCLUDED_VMS=$(cat "$EXCLUDE_FILE" | tr "," "\n")
 elif [ -n "$EXCLUDE_LIST" ]; then
-    EXCLUDED_VMS=`echo "$EXCLUDE_LIST"`
+    EXCLUDED_VMS=$(echo "$EXCLUDE_LIST" | tr "," "\n")
 fi
 
 ##############################################################
@@ -130,6 +130,7 @@ fi
 ##############################################################
 
 get_block_devs() {
+  VM="$1"
   # List the block devices (vda etc.) for a domain.
   virsh domblklist "$VM" --details | awk '$2 == "disk" {print $3}'
 }
@@ -238,7 +239,7 @@ fi
 
 for VM in $VMLIST ; do
     # Check of VM is on exclude list
-    if [ -n "$EXCLUDED_VMS" ] && echo "$EXCLUDED_VMS" | grep -Fwq "$VM" ; then
+    if [ -n "$EXCLUDED_VMS" ] && echo "$EXCLUDED_VMS" | grep --silent "^$VM$" ; then
         continue
     fi
 
