@@ -240,6 +240,7 @@ fi
 for VM in $VMLIST ; do
     # Check of VM is on exclude list
     if [ -n "$EXCLUDED_VMS" ] && echo "$EXCLUDED_VMS" | grep --silent "^$VM$" ; then
+        echo "Excluding VM '$VM'."
         continue
     fi
 
