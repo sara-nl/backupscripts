@@ -38,3 +38,7 @@ To enable libvirt snapshots, you need a Qemu version from the centos-release-qem
     yum -y install qemu-kvm-ev
 
 And then I'm afraid you need to reboot your VM host; a restart of `libvirtd` is not enough.
+
+Known issue:
+
+* During snapshot, the VM may freeze for a while. This could interrupt connections.
