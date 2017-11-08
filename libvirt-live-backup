@@ -24,6 +24,9 @@
 #   root@vmhost:~ # virsh create /var/lib/libvirt/images/backups/myvm.xml 
 #   Domain myvm created from /var/lib/libvirt/images/backups/myvm.xml
 
+# Known issue:
+# - During snapshot, the VM may freeze for a while. This might interrupt connections.
+
 # Changelog
 # 2017-07-26 - Initial version - Onno
 # 2017-07-27 - Code improvements - Onno
