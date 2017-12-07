@@ -32,3 +32,6 @@ BACKUPDIR=/users/username/backups/
 
 # Make a new chain after how much time?
 export BACKUPCHAINLENGTH='1M'
+
+# With --check, what is the reference date? See 'man date' for syntax. Default: '30 hours ago'.
+#export REF_DATE='30 hours ago'
