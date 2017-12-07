@@ -7,7 +7,7 @@
 # 2017-05-23 - Added ulimit - Onno
 # 2017-05-26 - Adapted to Swift - Onno
 # 2017-08-21 - Init DUPLICITY_OPTIONS in the config file instead of the main script - Onno
-# 2017-08029 - Pass on unknown options to duplicity - Onno
+# 2017-08-29 - Pass on unknown options to duplicity - Onno
 
 usage() {
   cat <<-EOF
@@ -108,6 +108,10 @@ if [ -z "$BACKUPCHAINLENGTH" ] ; then
   BACKUPCHAINLENGTH='3M'
 fi
 
+if [ -z "$REF_DATE" ] ; then
+  REF_DATE='30 hours ago'
+fi
+
 # Newer versions of Duplicity want this
 if [ $(ulimit -n) -lt 1024 ] ; then
   ulimit -n 1024
@@ -179,10 +183,10 @@ if $CHECK ; then
     exit $STATE_UNKNOWN
   fi
   # Compare Unix time stamps
-  refdate=$(date -d '30 hours ago' +%s)
+  refdate=$(date -d "$REF_DATE" +%s)
   lastdate=$(date -d "$lastbackup" +%s)
   if [ $lastdate -lt $refdate ] ; then
-    echo "CRITICAL: last backup was more than 30 hours ago: $lastbackup"
+    echo "CRITICAL: last backup was older than $REF_DATE: $lastbackup"
     exit $STATE_CRITICAL
   else
     echo "OK: Last backup date is recent: $lastbackup" 
@@ -213,6 +217,7 @@ echo "Exclude list: ${EXCLUDE[@]}"
 # Run backup.
 echo "Backing up $SOURCE to $DESTINATION"
 
+set -x
 duplicity $DUPLICITY_OPTIONS \
           $DUPLICITY_CLI_OPTIONS \
           --ssl-cacert-path /etc/grid-security/certificates/ \
@@ -220,6 +225,7 @@ duplicity $DUPLICITY_OPTIONS \
           $EXCLUDELIST \
           $SOURCE \
           "$DESTINATION"
+set +x
 
 echo "Backup finished."
 
