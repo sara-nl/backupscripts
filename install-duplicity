@@ -19,11 +19,13 @@
 # 2017-07-25 - Added python-fasteners - Onno
 # 2017-07-25 - Pick the top tarball, assuming it's the newest (because sorting doesn't always work) - Onno
 # 2017-07-25 - Show installed version - Onno
+# 2017-12-19 - Added python-urllib3 python-requests to try and prevent https://ask.openstack.org/en/question/110437/importerror-cannot-import-name-unrewindablebodyerror/ - Onno
 
 # For package details see http://duplicity.nongnu.org/duplicity.1.html#sect30 (Requirements section)
 yum -y install wget gcc rsync \
                python-devel python-pip librsync-devel python-lockfile \
-               python-paramiko python-crypto python-boto python-fasteners
+               python-paramiko python-crypto python-boto python-fasteners \
+               python-urllib3 python-requests
 pip install --upgrade PyDrive python-swiftclient python-keystoneclient
 
 # Prepare dir
