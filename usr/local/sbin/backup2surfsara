@@ -12,7 +12,7 @@
 
 usage() {
   cat <<-EOF
-  Usage: $(basename $0) [--full|--report|--check] [--config <file>]
+	Usage: $(basename $0) [--full|--report|--check] [--config <file>] [--skip-pre] [--skip-post]
 	EOF
   exit 1
 }
