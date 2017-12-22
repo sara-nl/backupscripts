@@ -8,6 +8,7 @@
 # 2017-05-26 - Adapted to Swift - Onno
 # 2017-08-21 - Init DUPLICITY_OPTIONS in the config file instead of the main script - Onno
 # 2017-08-29 - Pass on unknown options to duplicity - Onno
+# 2017-12-22 - Added --skip-pre and --skip-post - Onno
 
 usage() {
   cat <<-EOF
@@ -20,6 +21,8 @@ usage() {
 REPORT=false
 CHECK=false
 CONFIG=/etc/backup2surfsara
+RUN_PRE=true
+RUN_POST=true
 DUPLICITY_CLI_OPTIONS=''   # Options can be set in the config file too but that is not loaded yet.
 while [ $# -gt 0 ] ; do
   case "$1" in
@@ -38,6 +41,12 @@ while [ $# -gt 0 ] ; do
     --config )
       CONFIG="$2"
       shift
+      ;;
+    --skip-pre | --skippre )
+      RUN_PRE=false
+      ;;
+    --skip-post | --skippost )
+      RUN_POST=false
       ;;
     * )
       echo "Will pass on option '$1' to duplicity."
@@ -202,7 +211,7 @@ date
 
 
 # Things to do before the backup. You can define this function in /etc/backup2surfsara.
-if function_exists pre_backup ; then
+if $RUN_PRE && function_exists pre_backup ; then
   echo "Excuting pre_backup ..."
   pre_backup
   echo "Finished pre_backup."
@@ -239,7 +248,7 @@ echo "Finished cleanup."
 
 
 # Things to do after backup. You can define this function in /etc/backup2surfsara.
-if function_exists post_backup ; then
+if $RUN_POST && function_exists post_backup ; then
   echo "Excuting post_backup ..."
   post_backup
   echo "Finished post_backup."
