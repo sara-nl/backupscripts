@@ -21,8 +21,10 @@
 # 1. Copy back disk image(s):
 #   root@vmhost:~ # cp /var/lib/libvirt/images/backups/myvm.img /var/lib/libvirt/images/
 # 2. Re-create the VM:
-#   root@vmhost:~ # virsh create /var/lib/libvirt/images/backups/myvm.xml 
-#   Domain myvm created from /var/lib/libvirt/images/backups/myvm.xml
+#   root@vmhost:~ # virsh define /var/lib/libvirt/images/backups/myvm.xml 
+#   Domain myvm defined from /var/lib/libvirt/images/backups/myvm.xml
+#   root@vmhost:~ # virsh start myvm
+#   Domain myvm started
 
 # Known issue:
 # - During snapshot, the VM may freeze for a while. This might interrupt connections.
