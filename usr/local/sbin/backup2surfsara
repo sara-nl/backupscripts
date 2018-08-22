@@ -9,10 +9,11 @@
 # 2017-08-21 - Init DUPLICITY_OPTIONS in the config file instead of the main script - Onno
 # 2017-08-29 - Pass on unknown options to duplicity - Onno
 # 2017-12-22 - Added --skip-pre and --skip-post - Onno
+# 2018-08-22 - Added --debug
 
 usage() {
   cat <<-EOF
-	Usage: $(basename $0) [--full|--report|--check] [--config <file>] [--skip-pre] [--skip-post]
+	Usage: $(basename $0) [--full|--report|--check] [--config <file>] [--skip-pre] [--skip-post] [--debug]
 	EOF
   exit 1
 }
@@ -48,6 +49,8 @@ while [ $# -gt 0 ] ; do
     --skip-post | --skippost )
       RUN_POST=false
       ;;
+    --debug )
+      DUPLICITY_CLI_OPTIONS="--verbosity DEBUG $DUPLICITY_CLI_OPTIONS"
     * )
       echo "Will pass on option '$1' to duplicity."
       DUPLICITY_CLI_OPTIONS="$DUPLICITY_CLI_OPTIONS $1"
