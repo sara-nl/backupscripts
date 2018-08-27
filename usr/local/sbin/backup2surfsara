@@ -51,6 +51,7 @@ while [ $# -gt 0 ] ; do
       ;;
     --debug )
       DUPLICITY_CLI_OPTIONS="--verbosity DEBUG $DUPLICITY_CLI_OPTIONS"
+      ;;
     * )
       echo "Will pass on option '$1' to duplicity."
       DUPLICITY_CLI_OPTIONS="$DUPLICITY_CLI_OPTIONS $1"
