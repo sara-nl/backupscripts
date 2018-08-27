@@ -10,6 +10,7 @@ EXCLUDE=( /proc \
           /var/log \
           /var/www/cobbler/repo_mirror \
           /var/cache \
+          /run \
           /root/.cache/ \
           /home/*/.cache \
           /home/*/nobackup \
