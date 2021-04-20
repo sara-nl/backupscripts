@@ -37,6 +37,7 @@
 # 2017-07-29 - Besides Qcow2 also support for raw images - Onno
 # 2017-08-23 - Add exclude option and change of parsing user arguments - Tom
 # 2017-08-24 - Extend exclude option with a file & command-line argument option - Tom
+# 2021-04-19 - Restore original state when interrupted - Onno
 
 
 ##############################################################
@@ -251,7 +252,11 @@ for VM in $VMLIST ; do
 
     # Start backup job
     copy_xml "$VM"
+    # When script is interrupted, pivot back to original state.
+    trap "remove_vm_snapshot '$VM'" EXIT
     create_vm_snapshot "$VM"
     copy_disks "$VM"
+    # We're pivoting back to original state; catching exit no longer needed.
+    trap - EXIT
     remove_vm_snapshot "$VM"
 done
