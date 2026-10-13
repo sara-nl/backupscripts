@@ -1,33 +1,32 @@
 #!/bin/bash
 
-# Backs up running Libvirt virtual machines by creating snapshots.
+# Backs up running Libvirt virtual machines using the libvirt backup API
+# (virsh backup-begin). QEMU makes a point-in-time copy of each disk while
+# the VM keeps running on its own disks; no snapshots or overlays are involved.
+# Meant to be followed by a file based backup tool like duplicity.
 
-# Based on http://wiki.libvirt.org/page/Live-disk-backup-with-active-blockcommit
 # Disclaimer: this script could destroy your data! Don't use without testing first!
 # Features:
 #  * Can back up one VM or all running VMs (with --all)
-#  * If a VM has multiple block devices, all will be backed up
-#  * The backups will be sparse files, to save space
+#  * If a VM has multiple disks, all will be backed up (cdroms etc. are skipped)
+#  * Each disk is backed up with the name and format (qcow2 or raw) of the
+#    original image, overwriting the previous backup. The backups will be sparse files.
+#  * Refuses to write into a dir that contains VM images, so that the
+#    originals can never be overwritten
 
-# Requirements on RHEL/Centos: to make live snapshots, you need a Qemu version 
-# from the centos-release-qemu-ev repo.
-#   yum -y install centos-release-qemu-ev
-#   yum -y install qemu-kvm-ev
-# And then reboot your VM host... A restart of libvirt is not enough.
-# Best practice; install the qemu-guest-agent on your virtual machine(s).
-#   yum -y install qemu-guest-agent
+# Requirements: libvirt >= 6.0 and QEMU >= 4.2.
+# Best practice: install the qemu-guest-agent on your virtual machine(s),
+# so that filesystems can be frozen for a consistent backup.
+# The target dir must be writable for QEMU (and allowed by SELinux/AppArmor).
 
 # Restore procedure:
 # 1. Copy back disk image(s):
-#   root@vmhost:~ # cp /var/lib/libvirt/images/backups/myvm.img /var/lib/libvirt/images/
+#   root@vmhost:~ # cp --sparse=always /var/lib/libvirt/images/backups/myvm.qcow2 /var/lib/libvirt/images/
 # 2. Re-create the VM:
-#   root@vmhost:~ # virsh define /var/lib/libvirt/images/backups/myvm.xml 
+#   root@vmhost:~ # virsh define /var/lib/libvirt/images/backups/myvm.xml
 #   Domain myvm defined from /var/lib/libvirt/images/backups/myvm.xml
 #   root@vmhost:~ # virsh start myvm
 #   Domain myvm started
-
-# Known issue:
-# - During snapshot, the VM may freeze for a while. This might interrupt connections.
 
 # Changelog
 # 2017-07-26 - Initial version - Onno
@@ -38,17 +37,25 @@
 # 2017-08-23 - Add exclude option and change of parsing user arguments - Tom
 # 2017-08-24 - Extend exclude option with a file & command-line argument option - Tom
 # 2021-04-19 - Restore original state when interrupted - Onno
+# 2026-10-07 - Use libvirt backup API instead of snapshot + blockcommit;
+#              back up the inactive (persistent) XML;
+#              refuse to back up into a dir with VM images - Onno & Claude
+# 2026-10-09 - Retry thawing and report VMs that stay frozen - Onno & Claude
 
 
 ##############################################################
 #   Not really changeable variables
 ##############################################################
 # Script name
-MYNAME=`basename $0`
-# Hostname
-MYHOST=`/bin/hostname -s`
-# Name suffix for the overlay files
-SUFFIX='-libvirt-live-backup-overlay'
+MYNAME=$(basename "$0")
+# Minimal versions for the backup API
+MIN_LIBVIRT_VERSION='6.0.0'
+MIN_QEMU_VERSION='4.2.0'
+# Seconds between checks whether a backup job is done
+POLL_INTERVAL=5
+# How often to try to thaw the filesystems of a VM, and seconds between tries
+THAW_TRIES=5
+THAW_RETRY_INTERVAL=5
 
 ##############################################################
 #   Help Function
@@ -57,12 +64,12 @@ SUFFIX='-libvirt-live-backup-overlay'
 show_help() {
     echo
     echo " Usage: $MYNAME [ -s | -a | -e | -f | -t | -d | -h ]"
-    echo "  -a | --all       : Backup all servers"
-    echo "  -d | --debug     : Debug mode"
+    echo "  -a | --all       : Backup all running servers"
+    echo "  -d | --debug     : Debug mode (show backup job progress)"
     echo "  -e | --exclude   : Exclude list, comma separated"
     echo "  -f | --file      : File with an exclude list, comma or newline separated"
     echo "  -s | --single    : Backup a single server (string)"
-    echo "  -t | --targetdir : Target dir (Location to back up to.)"
+    echo "  -t | --targetdir : Target dir (Local dir to back up to.)"
     echo "  -h | --help      : Show this menu"
     echo
     echo " Examples: $MYNAME -s test-vm -t /var/lib/libvirt/backups/ "
@@ -78,12 +85,11 @@ show_help() {
 ##############################################################
 
 # Read the given arguments
-while [[ $# > 0 ]]
+while [[ $# -gt 0 ]]
 do
     key="$1"
     case $key in
         -d|--debug )    DEBUG="1"
-                        shift # next argument
                         ;;
         -s|--single)    SINGLE="$2"
                         shift # next argument
@@ -124,6 +130,12 @@ if [ -z "$TARGETDIR" ] ; then
     exit 1
 fi
 
+# QEMU writes the backup itself, so the target must be a local dir.
+if [[ "$TARGETDIR" == *:* ]] ; then
+    echo "ERROR: target dir '$TARGETDIR' looks like a remote location. Only local dirs are supported."
+    exit 1
+fi
+
 # Use the exclude file when it is specified, otherwise check for a exclude list from the command line
 if [ -n "$EXCLUDE_FILE" ] && [ -f "$EXCLUDE_FILE" ]; then
     EXCLUDED_VMS=$(cat "$EXCLUDE_FILE" | tr "," "\n")
@@ -131,109 +143,249 @@ elif [ -n "$EXCLUDE_LIST" ]; then
     EXCLUDED_VMS=$(echo "$EXCLUDE_LIST" | tr "," "\n")
 fi
 
+if ! which fallocate >/dev/null 2>&1 ; then
+    echo "ERROR: 'fallocate' (util-linux) is required to make the backups sparse."
+    exit 1
+fi
+
+if ! which qemu-img >/dev/null 2>&1 ; then
+    echo "ERROR: 'qemu-img' is required to determine the disk image formats."
+    exit 1
+fi
+
 ##############################################################
 #   Functions
 ##############################################################
 
-get_block_devs() {
-  VM="$1"
-  # List the block devices (vda etc.) for a domain.
-  virsh domblklist "$VM" --details | awk '$2 == "disk" {print $3}'
+version_ge() {
+  # Returns true if version $1 >= version $2.
+  [ "$(printf '%s\n' "$1" "$2" | sort -V | head -n 1)" = "$2" ]
 }
 
-get_snapshot_backing_files() {
-  # virsh does not seem to have a command to get the backing files of a snapshot.
-  # virsh domblklist only lists the overlay files when a snapshot has been made;
-  # not the actual files we want to back up.
-  # So we need to extract the backing files from the VM XML output.
-  VM="$1"
-  virsh dumpxml "$VM" \
-  | sed -n "/<backingStore type='file'/,/<\/backingStore>/ { /source file/p }" \
-  | sed -e "s/.*<source file='\(.*\)'\/>.*/\1/g"
+check_versions() {
+  versions=$(virsh version) || exit 1
+  libvirt_version=$(awk '/^Using library: libvirt/ {print $4}' <<<"$versions")
+  qemu_version=$(awk '/^Running hypervisor: QEMU/ {print $4}' <<<"$versions")
+  if ! version_ge "$libvirt_version" "$MIN_LIBVIRT_VERSION" ; then
+    echo "ERROR: libvirt '$libvirt_version' is too old; at least $MIN_LIBVIRT_VERSION is required."
+    exit 1
+  fi
+  if ! version_ge "$qemu_version" "$MIN_QEMU_VERSION" ; then
+    echo "ERROR: QEMU '$qemu_version' is too old; at least $MIN_QEMU_VERSION is required."
+    exit 1
+  fi
+}
+
+check_target_dir() {
+  # The backups get the same names as the original images. So if the target dir
+  # is a dir with VM images, a backup would replace an original. Check against
+  # the images (including backing files) of all VMs, not only the ones we back up.
+  # -ef compares inodes, so symlinks and bind mounts are caught too.
+  virsh list --all --name | while read -r vm ; do
+    [ -z "$vm" ] && continue
+    virsh dumpxml "$vm" </dev/null | sed -n "s/.*<source \(file\|dev\)='\([^']*\)'.*/\2/p"
+  done | while read -r image ; do
+    if [ "$(dirname "$image")" -ef "$TARGETDIR" ] ; then
+      echo "ERROR: target dir '$TARGETDIR' contains VM image '$image'. Please back up to a separate dir."
+      exit 1
+    fi
+  done || exit 1
+}
+
+get_image_format() {
+  # -U: the image is in use by the running VM.
+  LC_ALL=C qemu-img info -U "$1" | awk -F': *' '/^file format:/ {print $2; exit}'
+}
+
+xml_escape() {
+  sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e "s/'/\&apos;/g" <<<"$1"
 }
 
 copy_xml() {
   VM="$1"
   xmlfile=$(mktemp)
   echo "Copying the XML definition of '$VM'..."
-  virsh dumpxml "$VM" > "$xmlfile"
-  rsync --archive "$xmlfile" "$TARGETDIR/$VM.xml"
+  # --inactive: the persistent definition, which is what 'virsh define' needs;
+  # not the runtime state of the running VM.
+  virsh dumpxml --inactive "$VM" > "$xmlfile" \
+  && rsync --archive "$xmlfile" "$TARGETDIR/$VM.xml"
+  result=$?
   rm -f "$xmlfile"
+  return $result
+}
+
+create_backup_xml() {
+  # Writes the backup XML for $VM to file $2, and fills the TMPFILES array
+  # with the files QEMU will write to.
+  VM="$1"
+  backupxml="$2"
+  echo "<domainbackup mode='push'>" > "$backupxml"
+  echo "  <disks>" >> "$backupxml"
+  result=0
+  # Columns of 'domblklist --details': Type Device Target Source
+  while read -r type device target source ; do
+    if [ "$device" != "disk" ] || [ "$source" = "-" ] ; then
+      echo "  Skipping $device '$target'."
+      echo "    <disk name='$target' backup='no'/>" >> "$backupxml"
+      continue
+    fi
+    if [ "$type" != "file" ] && [ "$type" != "block" ] ; then
+      echo "ERROR: disk '$target' of '$VM' is of type '$type'; only file and block disks are supported."
+      result=1
+      continue
+    fi
+    format=$(get_image_format "$source")
+    if [ "$format" != "qcow2" ] && [ "$format" != "raw" ] ; then
+      echo "ERROR: disk '$source' of '$VM' has format '$format'; only qcow2 and raw are supported."
+      result=1
+      continue
+    fi
+    # The backup gets the name of the original image.
+    backupfile="$TARGETDIR/$(basename "$source")"
+    if [ -n "${BACKUP_FILES[$backupfile]}" ] ; then
+      echo "ERROR: disk '$source' of '$VM' would overwrite the backup of ${BACKUP_FILES[$backupfile]}."
+      result=1
+      continue
+    fi
+    BACKUP_FILES[$backupfile]="'$source' of '$VM'"
+    tmpfile="$backupfile.tmp"
+    TMPFILES+=("$tmpfile")
+    cat >> "$backupxml" <<-EOF
+	    <disk name='$target' type='file'>
+	      <target file='$(xml_escape "$tmpfile")'/>
+	      <driver type='$format'/>
+	    </disk>
+	EOF
+  done < <(virsh domblklist "$VM" --details | awk 'NR > 2 && NF > 0')
+  echo "  </disks>" >> "$backupxml"
+  echo "</domainbackup>" >> "$backupxml"
+  return $result
+}
+
+wait_for_backup_job() {
+  # Waits until the backup job of $VM is done; returns true if it succeeded.
+  VM="$1"
+  while virsh domjobinfo "$VM" | grep --silent '^Job type: *Unbounded' ; do
+    if [ -n "$DEBUG" ] ; then
+      virsh domjobinfo "$VM" | grep -E '^(Time elapsed|Data processed|Data remaining):'
+    fi
+    sleep $POLL_INTERVAL
+  done
+  jobinfo=$(virsh domjobinfo "$VM" --completed)
+  [ -n "$DEBUG" ] && echo "$jobinfo"
+  grep --silent '^Job type: *Completed' <<<"$jobinfo"
+}
+
+thaw_vm() {
+  # Thaws the filesystems of $1, with retries. A Linux guest stays frozen until
+  # it is thawed (there is no timeout), so writes in the VM would hang.
+  VM="$1"
+  for (( try = 1 ; try <= THAW_TRIES ; try++ )) ; do
+    virsh domfsthaw "$VM" >/dev/null && return 0
+    if [ $try -lt $THAW_TRIES ] ; then
+      echo "WARNING: could not thaw the filesystems of '$VM' (try $try of $THAW_TRIES); retrying in $THAW_RETRY_INTERVAL seconds."
+      sleep $THAW_RETRY_INTERVAL
+    fi
+  done
+  echo "ERROR: the filesystems of '$VM' may still be frozen! Writes in the VM will hang."
+  echo "       Please check, and thaw them with: virsh domfsthaw '$VM'"
+  return 1
+}
+
+backup_vm() {
+  VM="$1"
+  if [ "$(virsh domstate "$VM")" != "running" ] ; then
+    echo "ERROR: VM '$VM' is not running."
+    return 1
+  fi
+
+  copy_xml "$VM" || return 1
+
+  backupxml=$(mktemp)
+  if ! create_backup_xml "$VM" "$backupxml" ; then
+    rm -f "$backupxml"
+    return 1
+  fi
+  if [ ${#TMPFILES[@]} -eq 0 ] ; then
+    echo "ERROR: VM '$VM' has no disks to back up."
+    rm -f "$backupxml"
+    return 1
+  fi
+  [ -n "$DEBUG" ] && cat "$backupxml"
+
+  # Leftovers of an interrupted run would make backup-begin fail.
+  rm -f "${TMPFILES[@]}"
+
+  # Freeze the filesystems for a consistent backup. This only takes as long as
+  # starting the backup job. Without guest agent we continue unfrozen.
+  if virsh domfsfreeze "$VM" >/dev/null ; then
+    FROZEN=1
+  else
+    echo "WARNING: could not freeze the filesystems of '$VM'; is the qemu-guest-agent running? Continuing without."
+  fi
+  echo "Starting backup of '$VM' to '$TARGETDIR' ..."
+  virsh backup-begin "$VM" --backupxml "$backupxml"
+  result=$?
+  rm -f "$backupxml"
+  [ $result -eq 0 ] && JOB_STARTED=1
+  # If thawing fails, FROZEN stays set so cleanup_vm tries again after the job.
+  # The backup itself is still fine, so we continue with it.
+  thaw_failed=''
+  if [ -n "$FROZEN" ] ; then
+    if thaw_vm "$VM" ; then
+      FROZEN=''
+    else
+      thaw_failed=1
+    fi
+  fi
+  [ $result -eq 0 ] || return 1
+
+  if ! wait_for_backup_job "$VM" ; then
+    JOB_STARTED=''
+    echo "ERROR: backup job of '$VM' failed."
+    return 1
+  fi
+  JOB_STARTED=''
+
+  # Replace the previous backup with the new one.
+  for tmpfile in "${TMPFILES[@]}" ; do
+    echo "  ${tmpfile%.tmp}"
+    # QEMU may have written zeroes instead of holes; punch holes to keep it sparse.
+    fallocate --dig-holes "$tmpfile" \
+    && mv -f "$tmpfile" "${tmpfile%.tmp}" \
+    || return 1
+  done
+  [ -n "$thaw_failed" ] && return 1
   echo "Done."
 }
 
-create_vm_snapshot() {
-  VM="$1"
-  if virsh domblklist "$VM" --details | grep 'disk' | egrep -v '\.(qcow2|img)$' ; then
-    echo "ERROR: this VM contains a disk format that has not been tested."
-    exit 1
+cleanup_vm() {
+  # Undoes whatever backup_vm left behind: a running job, frozen filesystems
+  # or temporary files. The VM itself is never changed by the backup.
+  if [ -n "$JOB_STARTED" ] ; then
+    echo "Aborting backup job of '$CURRENT_VM'..."
+    virsh domjobabort "$CURRENT_VM"
   fi
-  diskspecs=$(virsh domblklist "$VM" --details \
-              | awk '$2 == "disk" {print "--diskspec " $3 ",file=" $4}' \
-              | sed -e "s/\.\(qcow2\|img\)$/$SUFFIX.\1/" \
-              | tr '\n' ' ')
-  # First try with --quiesce to get more consistent snapshot; if that fails, try without; if that failes, quit.
-  virsh snapshot-create-as --domain "$VM" \
-                           --name "$VM-snapshot" \
-                           $diskspecs \
-                           --disk-only --atomic --quiesce \
-  || virsh snapshot-create-as --domain "$VM" \
-                           --name "$VM-snapshot" \
-                           $diskspecs \
-                           --disk-only --atomic \
-  || exit 1
-}
-
-copy_disks() {
-  # Make a copy of the disks snapshots.
-  VM="$1"
-  echo "Copying snapshot disks to '$TARGETDIR' ..."
-  # disks may have different names than the VM! extract names from domblklist!
-  for file in $(get_snapshot_backing_files "$VM") ; do
-    echo "  $file"
-    # --archive = keep file properties (ownership etc)
-    # --sparse  = make small copies
-    rsync --archive --sparse "$file" "$TARGETDIR"
-  done
-}
-
-remove_vm_snapshot() {
-  VM="$1"
-  success=''
-  # For each block device, commit the changes in the overlay into the backing store.
-  for blockdev in $(get_block_devs "$VM") ; do
-    virsh blockcommit "$VM" $blockdev --active --verbose --wait --pivot \
-    || exit 1
-  done
-  # Now delete the snapshot.
-  virsh snapshot-delete --domain "$VM" --metadata "$VM-snapshot" \
-  || exit 1
-  # Print a list of the current status.
-  echo "Cleaning up committed overlay files..."
-  files_in_use=$(virsh dumpxml $VM | awk -F  "'" '/<source file=.*/ {print $2}')
-  for overlayfile in $(virsh domblklist "$VM" --details \
-                       | awk '$2 == "disk" {print $4}' \
-                       | sed -e "s/\.\(qcow2\|img\)$/$SUFFIX.\1/")
-  do
-    # But first: test if the file is in use by the VM!
-    if fgrep "$overlayfile" <<<"$files_in_use" ; then
-      echo "ERROR: file '$overlayfile' is still referred to in the description of $VM. Please check 'virsh dumpxml $VM'"
-      echo "Not deleting '$overlayfile'."
-    else
-      echo "  $overlayfile"
-      rm -f "$overlayfile"
-    fi
-  done
-  virsh domblklist "$VM" --details
+  if [ -n "$FROZEN" ] ; then
+    thaw_vm "$CURRENT_VM" || STILL_FROZEN_VMS+=("$CURRENT_VM")
+  fi
+  if [ ${#TMPFILES[@]} -gt 0 ] ; then
+    rm -f "${TMPFILES[@]}"
+  fi
+  JOB_STARTED=''
+  FROZEN=''
+  TMPFILES=()
 }
 
 ##############################################################
 #   Main - start working here
 ##############################################################
 
+check_versions
+
 # Did we get a single VM name, or a --all request?
 if [ -n "$ALL" ]; then
-    VMLIST=$(virsh list | awk '/running/ {print $2}')
+    VMLIST=$(virsh list --name --state-running)
 elif [ -n "$SINGLE" ]; then
     VMLIST="$SINGLE"
 fi
@@ -243,20 +395,36 @@ if [ ! -d "$TARGETDIR" ]; then
     mkdir -p "$TARGETDIR"
 fi
 
-for VM in $VMLIST ; do
+check_target_dir
+
+# When the script is interrupted, abort the backup job, thaw and clean up.
+TMPFILES=()
+FAILED_VMS=()
+STILL_FROZEN_VMS=()
+# Backup files written in this run, to detect images with the same name.
+declare -A BACKUP_FILES
+trap cleanup_vm EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
+
+# fd 3, so nothing in the loop can eat the VM list from stdin.
+while read -r VM <&3 ; do
+    [ -z "$VM" ] && continue
     # Check of VM is on exclude list
-    if [ -n "$EXCLUDED_VMS" ] && echo "$EXCLUDED_VMS" | grep --silent "^$VM$" ; then
+    if [ -n "$EXCLUDED_VMS" ] && grep --silent --fixed-strings --line-regexp -- "$VM" <<<"$EXCLUDED_VMS" ; then
         echo "Excluding VM '$VM'."
         continue
     fi
 
-    # Start backup job
-    copy_xml "$VM"
-    # When script is interrupted, pivot back to original state.
-    trap "remove_vm_snapshot '$VM'" EXIT
-    create_vm_snapshot "$VM"
-    copy_disks "$VM"
-    # We're pivoting back to original state; catching exit no longer needed.
-    trap - EXIT
-    remove_vm_snapshot "$VM"
-done
+    CURRENT_VM="$VM"
+    backup_vm "$VM" || FAILED_VMS+=("$VM")
+    cleanup_vm
+done 3<<<"$VMLIST"
+
+if [ ${#STILL_FROZEN_VMS[@]} -gt 0 ] ; then
+    echo "ERROR: filesystems may still be frozen in: ${STILL_FROZEN_VMS[*]}"
+fi
+if [ ${#FAILED_VMS[@]} -gt 0 ] ; then
+    echo "ERROR: backup failed for: ${FAILED_VMS[*]}"
+    exit 1
+fi

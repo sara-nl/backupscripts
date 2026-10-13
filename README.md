@@ -26,19 +26,14 @@ A wrapper for Duplicity to more easily maintain your Duplicity backups.
 
 ## libvirt-live-backup
 
-Makes a backup of a running libvirt virtual machine. This is done by making a snapshot, copying that to a rsync compatible location (a /path or hostname:/path), and then cleaning up the snapshot.
+Makes a backup of a running libvirt virtual machine to a local dir, using the libvirt backup API (`virsh backup-begin`). QEMU makes a point-in-time copy of each disk while the VM keeps running on its own disks; no snapshots or overlays are involved. Meant to be followed by `backup2surfsara` (duplicity), which takes care of incremental backups.
 
-* Tested on Centos 7, but please don't use this on your production VMs without proper testing!
-* Supports multiple disks per VM.
+* Please don't use this on your production VMs without proper testing!
+* Requires libvirt >= 6.0 and QEMU >= 4.2.
+* Supports multiple disks per VM; cdroms etc. are skipped.
 * Can back up all running VMs with `--all`.
-
-To enable libvirt snapshots, you need a Qemu version from the centos-release-qemu-ev repo.
-
-    yum -y install centos-release-qemu-ev
-    yum -y install qemu-kvm-ev
-
-And then I'm afraid you need to reboot your VM host; a restart of `libvirtd` is not enough.
-
-Known issue:
-
-* During snapshot, the VM may freeze for a while. This could interrupt connections.
+* Each disk is backed up as a sparse file with the name and format (qcow2 or raw) of the original image, replacing the previous backup, so the target dir does not fill up.
+* The persistent VM definition is saved as `<vm>.xml`.
+* Refuses to back up into a dir that contains VM images (of any VM), so the originals can never be overwritten. Two disks with the same file name are refused too.
+* With the qemu-guest-agent installed in the VM, filesystems are frozen just for the moment the backup starts.
+* The target dir must be writable for QEMU (and allowed by SELinux/AppArmor).
