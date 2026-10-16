@@ -11,10 +11,12 @@
 # 2017-12-22 - Added --skip-pre and --skip-post - Onno
 # 2018-08-22 - Added --debug
 # 2021-03-16 - Better debugging; added --cleanup command
+# 2026-03-30 - Added --list-files; add short delay before start - Onno
+# 2026-10-16 - Remove deprecated duplicity option "--extra-clean" - Onno
 
 usage() {
   cat <<-EOF
-	Usage: $(basename $0) [--full|--report|--check|--cleanup] [--config <file>] [--skip-pre] [--skip-post] [--debug]
+	Usage: $(basename $0) [--full|--report|--check|--cleanup|--list-files] [--config <file>] [--skip-pre] [--skip-post] [--debug]
 	--cleanup : Clean up damaged temporary files that block a backup
 	EOF
   exit 1
@@ -24,6 +26,7 @@ usage() {
 REPORT=false
 CHECK=false
 CLEANUP=false
+LISTFILES=false
 CONFIG=/etc/backup2surfsara
 RUN_PRE=true
 RUN_POST=true
@@ -37,7 +40,7 @@ while [ $# -gt 0 ] ; do
     --full )
       DUPLICITY_CLI_OPTIONS="full $DUPLICITY_CLI_OPTIONS"
       ;;
-    --report )
+    --report | --status )
       REPORT=true
       ;;
     --check )
@@ -45,6 +48,11 @@ while [ $# -gt 0 ] ; do
       ;;
     --cleanup )
       CLEANUP=true
+      ;;
+    --list-files )
+      LISTFILES=true
+      RUN_PRE=false
+      RUN_POST=false
       ;;
     --config )
       CONFIG="$2"
@@ -218,6 +226,14 @@ if $CHECK ; then
 fi
 
 
+if $LISTFILES ; then
+  duplicity list-current-files \
+            --ssl-cacert-path /etc/grid-security/certificates/ \
+            "$DESTINATION"
+  exit 0
+fi
+
+
 if $CLEANUP ; then
   # Clean up failed backups. This may be necessary to make a new full backup.
   # Nagios return codes; with these, you can use this script directly as a Nagios plugin.
@@ -227,12 +243,18 @@ if $CLEANUP ; then
   STATE_UNKNOWN=3
   STATE_DEPENDENT=4
   $debug && set -x
-  duplicity cleanup --extra-clean --force \
+  duplicity cleanup \
             --ssl-cacert-path /etc/grid-security/certificates/ \
             "$DESTINATION"
   exit 0
 fi
 
+
+
+# Delay a bit so the user/admin can abort if needed, without
+# getting issues with incompleted snapshots.
+echo "Starting backup in 30 seconds. Abort with Ctrl+C."
+sleep 30s
 
 
 # Print timestamp for in log.
