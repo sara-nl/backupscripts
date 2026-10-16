@@ -10,10 +10,12 @@
 # 2017-08-29 - Pass on unknown options to duplicity - Onno
 # 2017-12-22 - Added --skip-pre and --skip-post - Onno
 # 2018-08-22 - Added --debug
+# 2021-03-16 - Better debugging; added --cleanup command
 
 usage() {
   cat <<-EOF
-	Usage: $(basename $0) [--full|--report|--check] [--config <file>] [--skip-pre] [--skip-post] [--debug]
+	Usage: $(basename $0) [--full|--report|--check|--cleanup] [--config <file>] [--skip-pre] [--skip-post] [--debug]
+	--cleanup : Clean up damaged temporary files that block a backup
 	EOF
   exit 1
 }
@@ -21,9 +23,11 @@ usage() {
 # Process arguments
 REPORT=false
 CHECK=false
+CLEANUP=false
 CONFIG=/etc/backup2surfsara
 RUN_PRE=true
 RUN_POST=true
+debug=false
 DUPLICITY_CLI_OPTIONS=''   # Options can be set in the config file too but that is not loaded yet.
 while [ $# -gt 0 ] ; do
   case "$1" in
@@ -39,6 +43,9 @@ while [ $# -gt 0 ] ; do
     --check )
       CHECK=true
       ;;
+    --cleanup )
+      CLEANUP=true
+      ;;
     --config )
       CONFIG="$2"
       shift
@@ -50,7 +57,8 @@ while [ $# -gt 0 ] ; do
       RUN_POST=false
       ;;
     --debug )
-      DUPLICITY_CLI_OPTIONS="--verbosity DEBUG $DUPLICITY_CLI_OPTIONS"
+      DUPLICITY_CLI_OPTIONS="--verbosity INFO $DUPLICITY_CLI_OPTIONS"
+      debug=true
       ;;
     * )
       echo "Will pass on option '$1' to duplicity."
@@ -184,6 +192,7 @@ if $CHECK ; then
   STATE_CRITICAL=2
   STATE_UNKNOWN=3
   STATE_DEPENDENT=4
+  $debug && set -x
   lastbackup=$(duplicity collection-status \
                    --ssl-cacert-path /etc/grid-security/certificates/ \
                    "$DESTINATION" \
@@ -207,6 +216,23 @@ if $CHECK ; then
   fi
   exit $STATE_UNKNOWN
 fi
+
+
+if $CLEANUP ; then
+  # Clean up failed backups. This may be necessary to make a new full backup.
+  # Nagios return codes; with these, you can use this script directly as a Nagios plugin.
+  STATE_OK=0
+  STATE_WARNING=1
+  STATE_CRITICAL=2
+  STATE_UNKNOWN=3
+  STATE_DEPENDENT=4
+  $debug && set -x
+  duplicity cleanup --extra-clean --force \
+            --ssl-cacert-path /etc/grid-security/certificates/ \
+            "$DESTINATION"
+  exit 0
+fi
+
 
 
 # Print timestamp for in log.
